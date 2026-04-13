@@ -27,7 +27,7 @@ Built with Electron 28 + React 18 + TypeScript. Runs on **Windows**, **Linux** a
 |------|---------|
 | Node.js | ≥ 18.x |
 | npm | ≥ 9.x |
-| zerod | Phoenix 5.0.0-beta2 |
+| zerod | ZercNOVA 5.1.1-RC1 |
 
 > **Windows**: Download Node.js from https://nodejs.org (LTS version).
 > Verify installation: `node -v` and `npm -v` in PowerShell.
