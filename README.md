@@ -25,7 +25,7 @@ Construit avec Electron 28 + React 18 + TypeScript. Tourne sur **Windows**, **Li
 |-------|---------|
 | Node.js | ≥ 18.x |
 | npm | ≥ 9.x |
-| zeroclassicd | 5.0.0 |
+| zerod | 5.0.0 |
 
 > **Windows** : Télécharger Node.js sur https://nodejs.org (prendre la version LTS).  
 > Vérifier l'installation : `node -v` et `npm -v` dans PowerShell.
