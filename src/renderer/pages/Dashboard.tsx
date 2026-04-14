@@ -187,7 +187,7 @@ function TxRow({ tx }: { tx: Transaction }) {
   const isSend = tx.type === 'send'
   const color   = isSend ? 'var(--red)' : 'var(--green)'
   const sign    = isSend ? '−' : '+'
-  const date    = tx.blocktime ? new Date(tx.blocktime * 1000).toLocaleDateString('fr-FR') : 'Pending'
+  const date    = tx.blocktime ? new Date(tx.blocktime * 1000).toLocaleDateString('en-GB') : 'Pending'
 
   function openExplorer(e: React.MouseEvent) {
     e.stopPropagation()

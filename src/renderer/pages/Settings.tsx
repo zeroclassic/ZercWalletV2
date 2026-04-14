@@ -160,6 +160,11 @@ export function Settings({ onRefresh }: Props) {
           </div>
         </Section>
 
+        {/* Node process */}
+        <Section title="Node process (zerod)">
+          <NodeControl />
+        </Section>
+
         {/* About */}
         <Section title="About">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -181,6 +186,121 @@ export function Settings({ onRefresh }: Props) {
           </button>
         </Section>
 
+      </div>
+    </div>
+  )
+}
+
+// ─── Node Control ────────────────────────────────────────────────────────────
+
+function NodeControl() {
+  const [status, setStatus]   = React.useState<any>(null)
+  const [loading, setLoading] = React.useState(false)
+  const [msg, setMsg]         = React.useState('')
+  const [customPath, setCustomPath] = React.useState('')
+
+  React.useEffect(() => {
+    refreshStatus()
+    const t = setInterval(refreshStatus, 5000)
+    return () => clearInterval(t)
+  }, [])
+
+  async function refreshStatus() {
+    try {
+      const s = await (window.zerc as any).getNodeStatus()
+      setStatus(s)
+      if (s?.path) setCustomPath(s.path)
+    } catch { /* ignore */ }
+  }
+
+  async function handleStart() {
+    setLoading(true); setMsg('')
+    try {
+      if (customPath && customPath !== status?.path) {
+        await (window.zerc as any).setNodePath(customPath)
+      }
+      const r = await (window.zerc as any).startNode()
+      setMsg(r.ok ? '✓ Node started successfully!' : `✗ ${r.error}`)
+      await refreshStatus()
+    } catch (e: any) { setMsg(`✗ ${e.message}`) }
+    finally { setLoading(false) }
+  }
+
+  async function handleStop() {
+    setLoading(true); setMsg('')
+    try {
+      await (window.zerc as any).stopNode()
+      setMsg('✓ Node stopped.')
+      await refreshStatus()
+    } catch (e: any) { setMsg(`✗ ${e.message}`) }
+    finally { setLoading(false) }
+  }
+
+  const isRunning = status?.running
+  const canStop   = status?.startedByUs
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+          background: isRunning ? 'var(--green)' : 'var(--red)',
+          boxShadow: `0 0 6px ${isRunning ? 'var(--green)' : 'var(--red)'}`,
+        }} />
+        <span style={{ fontSize: 13, color: isRunning ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+          {isRunning ? 'Node is running' : 'Node is not running'}
+        </span>
+        {status?.startedByUs && (
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            (started by ZercWallet)
+          </span>
+        )}
+      </div>
+
+      {/* zerod path */}
+      <Field label="zerod executable path">
+        <input
+          type="text"
+          value={customPath}
+          onChange={e => setCustomPath(e.target.value)}
+          placeholder={status?.placeholder ?? "e.g. /path/to/zerod"}
+          style={inputStyle}
+          className="selectable"
+        />
+        {status && !status.available && (
+          <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 5 }}>
+            ⚠ zerod not found automatically. Set the path manually above.
+          </div>
+        )}
+      </Field>
+
+      {msg && (
+        <div style={{
+          padding: '8px 12px', borderRadius: 7, fontSize: 12,
+          background: msg.startsWith('✓') ? 'var(--green-glow)' : 'var(--red-glow)',
+          border: `1px solid ${msg.startsWith('✓') ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}`,
+          color: msg.startsWith('✓') ? 'var(--green)' : 'var(--red)',
+          fontFamily: 'var(--font-mono)',
+        }}>
+          {msg}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        {!isRunning && (
+          <button onClick={handleStart} disabled={loading} style={btnStyle('var(--green)')}>
+            {loading ? '⟳ Starting…' : '▶ Start node'}
+          </button>
+        )}
+        {isRunning && canStop && (
+          <button onClick={handleStop} disabled={loading} style={btnStyle('var(--red)')}>
+            {loading ? '⟳ Stopping…' : '■ Stop node'}
+          </button>
+        )}
+        <button onClick={refreshStatus} style={btnStyle('var(--text-muted)')}>
+          ⟳ Refresh
+        </button>
       </div>
     </div>
   )

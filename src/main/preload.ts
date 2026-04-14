@@ -36,6 +36,17 @@ contextBridge.exposeInMainWorld('zerc', {
   zImportKey:         (key: string, rescan: string) => ipcRenderer.invoke(IPC.Z_IMPORT_KEY, key, rescan),
   zImportViewingKey:  (key: string, rescan: string) => ipcRenderer.invoke(IPC.Z_IMPORT_VIEWING_KEY, key, rescan),
   backupWallet:       (destination: string) => ipcRenderer.invoke(IPC.BACKUP_WALLET, destination),
+  // Node log streaming
+  onNodeLog:     (cb: (msg: string) => void) => ipcRenderer.on('node:log', (_, msg) => cb(msg)),
+  onNodeStopped: (cb: (code: number) => void) => ipcRenderer.on('node:stopped', (_, code) => cb(code)),
+  offNodeLog:    () => ipcRenderer.removeAllListeners('node:log'),
+
+  // Node management
+  getNodeStatus:  () => ipcRenderer.invoke('node:status'),
+  startNode:      () => ipcRenderer.invoke('node:start'),
+  stopNode:       () => ipcRenderer.invoke('node:stop'),
+  setNodePath:    (p: string) => ipcRenderer.invoke('node:setPath', p),
+
   // Node capabilities
   getCapabilities: () => ipcRenderer.invoke('node:capabilities'),
 

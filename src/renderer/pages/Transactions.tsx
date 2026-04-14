@@ -85,7 +85,7 @@ function TxRow({ tx }: { tx: Transaction }) {
   const color   = isSend ? 'var(--red)' : 'var(--green)'
   const sign    = isSend ? '−' : '+'
   const date    = tx.blocktime
-    ? new Date(tx.blocktime * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+    ? new Date(tx.blocktime * 1000).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
     : '—'
   const confirmColor = tx.confirmations === 0 ? 'var(--gold)'
     : tx.confirmations < 6 ? 'var(--accent-light)' : 'var(--green)'

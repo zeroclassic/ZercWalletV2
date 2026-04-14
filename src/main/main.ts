@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { nodeManager } from './nodeManager'
 import path from 'path'
 import { RpcClient } from './rpc'
 import { ConfigManager } from './config'
@@ -44,9 +45,37 @@ app.whenReady().then(async () => {
   }
   rpc = new RpcClient(config.rpc)
 
+  // Auto-start zerod if not already running
+  const isReachable = await rpc.isReachable()
+  if (!isReachable) {
+    if (nodeManager.isAvailable()) {
+      console.log('[Main] Node unreachable — attempting to start zerod automatically')
+      const result = nodeManager.start()
+      if (result.ok) {
+        // Wait up to 30s for the node to be ready
+        console.log('[Main] zerod started, waiting for RPC...')
+        for (let i = 0; i < 30; i++) {
+          await new Promise(r => setTimeout(r, 1000))
+          if (await rpc.isReachable()) {
+            console.log('[Main] Node is ready!')
+            break
+          }
+        }
+      } else {
+        console.warn('[Main] Could not start zerod:', result.error)
+      }
+    } else {
+      console.log('[Main] zerod not found — user must start it manually')
+    }
+  } else {
+    console.log('[Main] Node already running')
+  }
+
   // Détecte si addressindex est activé sur ce node
   try {
-    const testAddr = await rpc.call('getaddressesbyaccount', ['']).then((a: string[]) => a[0]).catch(() => null)
+    // Prend une adresse depuis listaddressgroupings (plus fiable)
+    const groups: any[][] = await rpc.call('listaddressgroupings').catch(() => [])
+    const testAddr = groups.flat()?.[0]?.[0] ?? null
     if (testAddr) {
       await rpc.call('getaddressbalance', [{ addresses: [testAddr] }])
       hasAddressIndex = true
@@ -61,7 +90,57 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => {
+  // Stop zerod only if we started it
+  if (nodeManager.wasStartedByUs()) {
+    nodeManager.stop()
+  }
+  if (process.platform !== 'darwin') app.quit()
+})
+
+// ─── Node log streaming ──────────────────────────────────────────────────────
+nodeManager.on('log', (msg: string) => {
+  mainWindow?.webContents.send('node:log', msg)
+})
+nodeManager.on('stopped', (code: number) => {
+  mainWindow?.webContents.send('node:stopped', code)
+})
+
+// ─── Node management ─────────────────────────────────────────────────────────
+ipcMain.handle('node:status', () => ({
+  available: nodeManager.isAvailable(),
+  running: nodeManager.isRunning(),
+  startedByUs: nodeManager.wasStartedByUs(),
+  path: nodeManager.getPath(),
+  platform: process.platform,
+  placeholder: process.platform === 'win32'
+    ? 'e.g. C:\\ZeroClassic\\zerod.exe'
+    : 'e.g. /usr/local/bin/zerod',
+  logs: nodeManager.getLogs(),
+}))
+
+ipcMain.handle('node:start', async () => {
+  const result = nodeManager.start()
+  if (result.ok) {
+    // Wait up to 30s
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000))
+      if (await rpc.isReachable()) return { ok: true }
+    }
+    return { ok: false, error: 'Node started but RPC not responding after 30s' }
+  }
+  return result
+})
+
+ipcMain.handle('node:stop', () => {
+  nodeManager.stop()
+  return { ok: true }
+})
+
+ipcMain.handle('node:setPath', (_, p: string) => {
+  nodeManager.setPath(p)
+  return { ok: true }
+})
 
 // ─── Node info ────────────────────────────────────────────────────────────────
 ipcMain.handle(IPC.GET_NODE_INFO, async () => {
@@ -186,9 +265,13 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
   } else {
     // ── Mode standard : listtransactions ────────────────────────────────────
     try {
-      const txList = await rpc.call('listtransactions', ['*', 100, 0], true)
+      // Récupère 500 entrées et trie par blocktime pour avoir les vraiment récentes
+      const txList = await rpc.call('listtransactions', ['*', 500, 0], true)
+      const sorted = (txList ?? []).sort((a: any, b: any) =>
+        (b.blocktime ?? b.time ?? 0) - (a.blocktime ?? a.time ?? 0)
+      )
       const seen = new Set<string>()
-      for (const tx of (txList ?? [])) {
+      for (const tx of sorted) {
         const key = tx.txid + (tx.address ?? '') + tx.category
         if (seen.has(key)) continue
         seen.add(key)
@@ -199,6 +282,7 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
           memo: tx.memo, type: tx.amount < 0 ? 'send' : 'receive',
           category: tx.category, isShielded: (tx.address ?? '').startsWith('z'),
         })
+        if (allTxs.length >= 100) break // Limite à 100 après tri
       }
     } catch (e: any) {
       console.warn('[TX] listtransactions failed:', e.message)

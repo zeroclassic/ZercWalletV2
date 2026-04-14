@@ -1,6 +1,6 @@
 {
   "name": "zerc-wallet",
-  "version": "2.0.23",
+  "version": "2.0.28",
   "description": "ZeroClassic Desktop Wallet - Full node UI for ZERC",
   "main": "dist/main/main.js",
   "author": {
@@ -108,6 +108,6 @@
   },
   "homepage": "https://zeroclassic.org",
   "zerc": {
-    "targetNode": "Phoenix 5.0.0-beta2"
+    "targetNode": "ZercNOVA - 5.1.1"
   }
 }
