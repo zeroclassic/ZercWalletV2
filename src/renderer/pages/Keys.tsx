@@ -215,7 +215,6 @@ function ImportTab({ onRefresh }: { onRefresh: () => Promise<void> }) {
       setError(e.message)
     } finally {
       setLoading(false)
-      setImportStatus('idle')
     }
   }
 
@@ -317,7 +316,6 @@ function BackupTab() {
       setError(e.message)
     } finally {
       setLoading(false)
-      setImportStatus('idle')
     }
   }
 

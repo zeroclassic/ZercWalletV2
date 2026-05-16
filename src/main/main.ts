@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import axios from 'axios'
 import { nodeManager } from './nodeManager'
 import path from 'path'
 import { RpcClient } from './rpc'
@@ -12,6 +13,7 @@ const isDev = process.env.NODE_ENV === 'development'
 let mainWindow: BrowserWindow | null = null
 let rpc: RpcClient
 let hasAddressIndex = false // détecté au démarrage
+const EXPLORER_API_URL = 'https://explorer.zeroclassic.org/api.php'
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -220,17 +222,68 @@ async function resolveFromAddress(txid: string, vout: number): Promise<string | 
   } catch { return null }
 }
 
+function explorerTimeToBlocktime(value: unknown): number | undefined {
+  if (typeof value !== 'string' || value.length === 0) return undefined
+  const normalized = value.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')
+  const ms = Date.parse(normalized)
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined
+}
+
+async function getExplorerAddressTransactions(addresses: string[], currentHeight: number): Promise<any[]> {
+  const unique = Array.from(new Set(addresses)).slice(0, 30)
+  const results = await Promise.all(unique.map(async address => {
+    try {
+      const response = await axios.get(EXPLORER_API_URL, {
+        params: { action: 'address', addr: address, limit: 80, offset: 0 },
+        timeout: 10_000,
+      })
+      if (!response.data?.ok) return []
+
+      const events = response.data.data?.events ?? []
+      return events.map((event: any) => {
+        const height = typeof event.height === 'number' ? event.height : Number(event.height)
+        const blocktime = explorerTimeToBlocktime(event.time)
+        const isSend = event.kind === 'out'
+        return {
+          txid: event.txid,
+          amount: isSend ? -Math.abs(Number(event.value) || 0) : Number(event.value) || 0,
+          fee: undefined,
+          confirmations: Number.isFinite(height) && height > 0 ? Math.max(0, currentHeight - height + 1) : 0,
+          blocktime,
+          address,
+          fromAddress: isSend ? address : null,
+          toAddress: isSend ? null : address,
+          memo: undefined,
+          type: isSend ? 'send' : 'receive',
+          category: isSend ? 'send' : 'receive',
+          isShielded: false,
+          height,
+          sourceRank: 0,
+        }
+      })
+    } catch (err: any) {
+      console.warn(`[TX] explorer address lookup failed for ${address}:`, err.message)
+      return []
+    }
+  }))
+  return results.flat()
+}
+
 ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
   const allTxs: any[] = []
   const walletAddrs = await getWalletAddresses()
+  const tWalletAddrs = Array.from(walletAddrs).filter(a => !a.startsWith('z'))
+  const currentInfo = await rpc.call('getinfo').catch(() => ({ blocks: 0 }))
+  const currentHeight = Number(currentInfo?.blocks ?? 0)
+  allTxs.push(...await getExplorerAddressTransactions(tWalletAddrs, currentHeight))
 
   if (hasAddressIndex) {
     // ── Mode rapide : addressindex disponible ────────────────────────────────
     // Récupère les txids des 100 dernières tx via getaddresstxids par adresse
     try {
-      const info = await rpc.call('getinfo')
+      const info = currentInfo?.blocks ? currentInfo : await rpc.call('getinfo')
       const startBlock = Math.max(0, info.blocks - 2000)
-      const tAddrs = Array.from(walletAddrs).filter(a => !a.startsWith('z'))
+      const tAddrs = tWalletAddrs
 
       if (tAddrs.length > 0) {
         const txids: string[] = await rpc.call('getaddresstxids', [{
@@ -338,7 +391,13 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
       seen2.add(key)
       return true
     })
-    .sort((a, b) => (b.blocktime ?? 0) - (a.blocktime ?? 0))
+    .sort((a, b) => {
+      const byTime = (b.blocktime ?? 0) - (a.blocktime ?? 0)
+      if (byTime !== 0) return byTime
+      const byHeight = (b.height ?? 0) - (a.height ?? 0)
+      if (byHeight !== 0) return byHeight
+      return (a.sourceRank ?? 9) - (b.sourceRank ?? 9)
+    })
     .slice(0, 100)
 
   // Résout from/to

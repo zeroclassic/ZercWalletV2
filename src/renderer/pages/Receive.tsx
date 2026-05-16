@@ -92,7 +92,6 @@ export function Receive({ addresses, onRefresh }: Props) {
                   value={selected.address}
                   size={160}
                   level="M"
-                  marginSize={0}
                 />
               </div>
 

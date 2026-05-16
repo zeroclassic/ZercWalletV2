@@ -1,9 +1,20 @@
-declare const __APP_VERSION__: string
-declare const __TARGET_NODE__: string
-
 import type { WalletBalance, ZercAddress, Transaction, NodeInfo, RPCConfig, SendTxParams } from '@shared/types'
 
+declare module '*.png' {
+  const src: string
+  export default src
+}
+
+declare module 'react' {
+  interface CSSProperties {
+    WebkitAppRegion?: 'drag' | 'no-drag'
+  }
+}
+
 declare global {
+  const __APP_VERSION__: string
+  const __TARGET_NODE__: string
+
   interface Window {
     zerc: {
       // Node
