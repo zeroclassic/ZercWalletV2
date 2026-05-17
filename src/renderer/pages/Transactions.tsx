@@ -3,13 +3,14 @@ import type { Transaction } from '@shared/types'
 
 interface Props {
   transactions: Transaction[]
+  privacyMode: boolean
 }
 
 type Filter = 'all' | 'send' | 'receive'
 
 const EXPLORER_URL = 'https://explorer.zeroclassic.org/tx/'
 
-export function Transactions({ transactions }: Props) {
+export function Transactions({ transactions, privacyMode }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
 
@@ -36,8 +37,8 @@ export function Transactions({ transactions }: Props) {
 
       {/* Summary */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 22 }}>
-        <SummaryChip label="Total received" value={`+${totalReceived.toFixed(4)} ZERC`} color="var(--green)" />
-        <SummaryChip label="Total sent"     value={`−${totalSent.toFixed(4)} ZERC`}     color="var(--red)" />
+        <SummaryChip label="Total received" value={privacyMode ? '+•••••••• ZERC' : `+${totalReceived.toFixed(8)} ZERC`} color="var(--green)" />
+        <SummaryChip label="Total sent"     value={privacyMode ? '−•••••••• ZERC' : `−${totalSent.toFixed(8)} ZERC`}     color="var(--red)" />
         <SummaryChip label="Transactions"   value={String(transactions.length)}           color="var(--accent-light)" />
       </div>
 
@@ -70,7 +71,7 @@ export function Transactions({ transactions }: Props) {
             {search ? 'No matching transactions' : 'No transactions yet'}
           </div>
         ) : (
-          filtered.map((tx, i) => <TxRow key={tx.txid + i} tx={tx} />)
+          filtered.map((tx, i) => <TxRow key={tx.txid + i} tx={tx} privacyMode={privacyMode} />)
         )}
       </div>
     </div>
@@ -79,15 +80,17 @@ export function Transactions({ transactions }: Props) {
 
 // ─── TxRow ────────────────────────────────────────────────────────────────────
 
-function TxRow({ tx }: { tx: Transaction }) {
+function TxRow({ tx, privacyMode }: { tx: Transaction; privacyMode: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const isSend  = tx.type === 'send'
   const color   = isSend ? 'var(--red)' : 'var(--green)'
   const sign    = isSend ? '−' : '+'
+  const amount = privacyMode ? `${sign}••••••••` : `${sign}${Math.abs(tx.amount).toFixed(8)}`
   const date    = tx.blocktime
     ? new Date(tx.blocktime * 1000).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
     : '—'
-  const confirmColor = tx.confirmations === 0 ? 'var(--gold)'
+  const failed = tx.category === 'failed'
+  const confirmColor = failed ? 'var(--red)' : tx.confirmations === 0 ? 'var(--gold)'
     : tx.confirmations < 6 ? 'var(--accent-light)' : 'var(--green)'
 
   function openExplorer(e: React.MouseEvent) {
@@ -141,7 +144,7 @@ function TxRow({ tx }: { tx: Transaction }) {
           {/* Amount + date */}
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color }}>
-              {sign}{Math.abs(tx.amount).toFixed(8)} ZERC
+              {amount} ZERC
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{date}</div>
           </div>
@@ -174,7 +177,7 @@ function TxRow({ tx }: { tx: Transaction }) {
             ↗ Explorer
           </button>
           <span style={{ fontSize: 10, color: confirmColor, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-            {tx.confirmations === 0 ? 'Pending' : `${tx.confirmations} conf`}
+            {failed ? 'Failed' : tx.confirmations === 0 ? 'Pending' : `${tx.confirmations} conf`}
           </span>
         </div>
       </div>
@@ -192,8 +195,10 @@ function TxRow({ tx }: { tx: Transaction }) {
           <DetailRow label="TxID"         value={tx.txid} />
           <DetailRow label="From"         value={tx.fromAddress ?? '—'} />
           <DetailRow label="To"           value={tx.toAddress ?? '—'} />
-          {tx.fee !== undefined && <DetailRow label="Fee" value={`${tx.fee} ZERC`} />}
+          {tx.fee !== undefined && <DetailRow label="Fee" value={`${tx.fee.toFixed(8)} ZERC`} />}
           {tx.memo && <DetailRow label="Memo" value={tx.memo} />}
+          {tx.error && <DetailRow label="Error" value={tx.error} />}
+          {failed && <DetailRow label="Status" value="Failed" />}
           <DetailRow label="Confirmations" value={String(tx.confirmations)} />
           {tx.blocktime && <DetailRow label="Date" value={new Date(tx.blocktime * 1000).toLocaleString()} />}
         </div>

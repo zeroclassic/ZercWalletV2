@@ -120,14 +120,14 @@ function ExportTab({ addresses }: { addresses: ZercAddress[] }) {
           <optgroup label="Transparent (T-addr)">
             {addresses.filter(a => a.type === 'transparent').map(a => (
               <option key={a.address} value={a.address}>
-                {a.address.slice(0, 22)}… — {a.balance.toFixed(4)} ZERC
+                {a.address.slice(0, 22)}… — {a.balance.toFixed(8)} ZERC
               </option>
             ))}
           </optgroup>
           <optgroup label="Shielded (Z-addr)">
             {addresses.filter(a => a.type === 'shielded').map(a => (
               <option key={a.address} value={a.address}>
-                {a.address.slice(0, 22)}… — {a.balance.toFixed(4)} ZERC
+                {a.address.slice(0, 22)}… — {a.balance.toFixed(8)} ZERC
               </option>
             ))}
           </optgroup>

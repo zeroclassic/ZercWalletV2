@@ -1,16 +1,39 @@
-import React from 'react'
-import type { WalletBalance, Transaction, NodeInfo } from '@shared/types'
+import React, { useEffect, useState } from 'react'
+import type { WalletBalance, Transaction, NodeInfo, MarketPrice } from '@shared/types'
 
 interface Props {
   balance: WalletBalance | null
   transactions: Transaction[]
   nodeInfo: NodeInfo | null
+  privacyMode: boolean
+  onTogglePrivacy: () => void
   onNavigate: (p: 'send' | 'receive' | 'transactions') => void
 }
 
-export function Dashboard({ balance, transactions, nodeInfo, onNavigate }: Props) {
+export function Dashboard({ balance, transactions, nodeInfo, privacyMode, onTogglePrivacy, onNavigate }: Props) {
   const recentTxs = transactions.slice(0, 10)
   const fmt = (n: number) => n.toFixed(8)
+  const [marketPrice, setMarketPrice] = useState<MarketPrice | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadPrice = () => {
+      window.zerc.getMarketPrice()
+        .then(price => { if (!cancelled) setMarketPrice(price) })
+        .catch(() => { if (!cancelled) setMarketPrice(null) })
+    }
+    loadPrice()
+    const timer = window.setInterval(loadPrice, 120_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  const price = marketPrice?.price ?? null
+  const totalUsd = balance && price !== null ? balance.total * price : null
+  const displayAmount = (value: string) => privacyMode ? '••••••••' : value
+  const displayUsd = (value: number | null) => privacyMode ? '$••••••' : value === null ? '—' : formatUsd(value)
 
   return (
     <div style={{ padding: '28px 32px', overflowY: 'auto', height: '100%' }}>
@@ -45,15 +68,22 @@ export function Dashboard({ balance, transactions, nodeInfo, onNavigate }: Props
           letterSpacing: '-0.02em',
           marginBottom: 6,
         }}>
-          {balance ? fmt(balance.total) : '—'}
+          {balance ? displayAmount(fmt(balance.total)) : '—'}
           <span style={{ fontSize: 16, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>ZERC</span>
+        </div>
+
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          {displayUsd(totalUsd)}
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
+            {price !== null ? `@ ${formatUsdPrice(price)} / ZERC` : marketPrice?.error ?? 'Price unavailable'}
+          </span>
         </div>
 
         {/* Split transparent / shielded */}
         {balance && (
           <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
-            <BalancePill label="Transparent" value={fmt(balance.transparent)} color="var(--accent-light)" />
-            <BalancePill label="Shielded (z)" value={fmt(balance.private)} color="var(--violet)" />
+            <BalancePill label="Transparent" value={displayAmount(fmt(balance.transparent))} color="var(--accent-light)" />
+            <BalancePill label="Shielded (z)" value={displayAmount(fmt(balance.private))} color="var(--violet)" />
           </div>
         )}
 
@@ -61,6 +91,7 @@ export function Dashboard({ balance, transactions, nodeInfo, onNavigate }: Props
         <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
           <ActionBtn label="↑ Send" accent="var(--accent-light)" onClick={() => onNavigate('send')} />
           <ActionBtn label="↓ Receive" accent="var(--violet)" onClick={() => onNavigate('receive')} />
+          <ActionBtn label={privacyMode ? 'Show amounts' : 'Hide amounts'} accent="var(--gold)" onClick={onTogglePrivacy} />
         </div>
       </div>
 
@@ -111,7 +142,7 @@ export function Dashboard({ balance, transactions, nodeInfo, onNavigate }: Props
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {recentTxs.map(tx => (
-              <TxRow key={tx.txid} tx={tx} />
+              <TxRow key={tx.txid} tx={tx} privacyMode={privacyMode} />
             ))}
           </div>
         )}
@@ -183,11 +214,13 @@ function StatCard({ label, value, icon, accent }: { label: string; value: string
 
 const EXPLORER_URL = 'https://explorer.zeroclassic.org/tx/'
 
-function TxRow({ tx }: { tx: Transaction }) {
+function TxRow({ tx, privacyMode }: { tx: Transaction; privacyMode: boolean }) {
   const isSend = tx.type === 'send'
-  const color   = isSend ? 'var(--red)' : 'var(--green)'
+  const failed  = tx.category === 'failed'
+  const color   = failed ? 'var(--red)' : isSend ? 'var(--red)' : 'var(--green)'
   const sign    = isSend ? '−' : '+'
   const date    = tx.blocktime ? new Date(tx.blocktime * 1000).toLocaleDateString('en-GB') : 'Pending'
+  const amount = privacyMode ? '••••••••' : `${sign}${Math.abs(tx.amount).toFixed(8)}`
 
   function openExplorer(e: React.MouseEvent) {
     e.stopPropagation()
@@ -217,7 +250,7 @@ function TxRow({ tx }: { tx: Transaction }) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600 }}>
-              {isSend ? 'Sent' : 'Received'}
+              {failed ? 'Failed' : isSend ? 'Sent' : 'Received'}
               {tx.category === 'generate' && <span style={{ color: 'var(--gold)', marginLeft: 6, fontSize: 9 }}>⛏ Mining</span>}
               {tx.isShielded && <span style={{ color: 'var(--violet)', marginLeft: 6, fontSize: 9 }}>🔒 Shielded</span>}
             </div>
@@ -225,7 +258,7 @@ function TxRow({ tx }: { tx: Transaction }) {
           </div>
         </div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color, fontWeight: 700 }}>
-          {sign}{Math.abs(tx.amount).toFixed(4)} ZERC
+          {amount} ZERC
         </div>
       </div>
       {/* From / To */}
@@ -267,4 +300,12 @@ function TxRow({ tx }: { tx: Transaction }) {
       </div>
     </div>
   )
+}
+
+function formatUsd(value: number) {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatUsdPrice(value: number) {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
 }

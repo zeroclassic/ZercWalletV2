@@ -2,7 +2,7 @@ import React from 'react'
 import type { NodeInfo } from '@shared/types'
 import logo from '../assets/logo.png'
 
-export type Page = 'dashboard' | 'send' | 'receive' | 'transactions' | 'addresses' | 'keys' | 'tools' | 'settings'
+export type Page = 'dashboard' | 'send' | 'receive' | 'transactions' | 'addresses' | 'contacts' | 'keys' | 'tools' | 'health' | 'settings'
 
 interface Props {
   current: Page
@@ -16,8 +16,10 @@ const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'receive',      label: 'Receive',       icon: '↓' },
   { id: 'transactions', label: 'Transactions',  icon: '≡' },
   { id: 'addresses',    label: 'Addresses',     icon: '⊞' },
+  { id: 'contacts',     label: 'Contacts',      icon: '@' },
   { id: 'keys',         label: 'Keys & Backup',  icon: '🔑' },
   { id: 'tools',        label: 'Tools',          icon: '🔧' },
+  { id: 'health',       label: 'Health',         icon: '+' },
   { id: 'settings',     label: 'Settings',      icon: '⚙' },
 ]
 

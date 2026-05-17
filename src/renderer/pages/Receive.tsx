@@ -183,7 +183,7 @@ function AddrGroup({ label, color, addrs, selected, onSelect }: {
                 {addr.address.slice(0, 14)}…{addr.address.slice(-8)}
               </span>
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                {addr.balance.toFixed(4)}
+                {addr.balance.toFixed(8)}
               </span>
             </button>
           )

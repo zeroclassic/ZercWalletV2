@@ -1,4 +1,4 @@
-import type { WalletBalance, ZercAddress, Transaction, NodeInfo, RPCConfig, SendTxParams } from '@shared/types'
+import type { WalletBalance, ZercAddress, Transaction, NodeInfo, NodeHealth, AddressDetails, RPCConfig, SendTxParams, FeeEstimate, MarketPrice } from '@shared/types'
 
 declare module '*.png' {
   const src: string
@@ -19,12 +19,17 @@ declare global {
     zerc: {
       // Node
       getNodeInfo: () => Promise<NodeInfo>
+      getNodeHealth: () => Promise<NodeHealth>
       // Wallet
       getBalance: () => Promise<WalletBalance>
       getAddresses: () => Promise<ZercAddress[]>
+      getAddressDetails: (address: string) => Promise<AddressDetails>
       getTransactions: () => Promise<Transaction[]>
+      getMarketPrice: () => Promise<MarketPrice>
       newAddress: (type: 'transparent' | 'shielded') => Promise<string>
+      estimateFee: (blocks?: number) => Promise<FeeEstimate>
       sendTransaction: (params: SendTxParams) => Promise<{ txid?: string; opid?: string; type: string }>
+      getOperationStatus: (opid: string) => Promise<any>
       // Keys & Backup
       dumpPrivkey: (address: string) => Promise<string>
       zExportKey: (address: string) => Promise<string>

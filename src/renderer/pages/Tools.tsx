@@ -97,7 +97,7 @@ function ShieldTab({ addresses, onRefresh }: { addresses: ZercAddress[]; onRefre
           <option value="">Select a T-address…</option>
           {tAddrs.map(a => (
             <option key={a.address} value={a.address}>
-              {a.address} — {a.balance.toFixed(4)} ZERC
+              {a.address} — {a.balance.toFixed(8)} ZERC
             </option>
           ))}
         </select>
@@ -117,7 +117,7 @@ function ShieldTab({ addresses, onRefresh }: { addresses: ZercAddress[]; onRefre
           <option value="">Select a Z-address…</option>
           {zAddrs.map(a => (
             <option key={a.address} value={a.address}>
-              {a.address.slice(0, 40)}… — {a.balance.toFixed(4)} ZERC
+              {a.address.slice(0, 40)}… — {a.balance.toFixed(8)} ZERC
             </option>
           ))}
         </select>
@@ -149,7 +149,7 @@ function ShieldTab({ addresses, onRefresh }: { addresses: ZercAddress[]; onRefre
           <div>{fromAddr.slice(0, 20)}…</div>
           <div style={{ color: 'var(--accent-light)' }}>↓ {selected.balance.toFixed(8)} ZERC (all UTXOs, limit=0)</div>
           <div>{toAddr.slice(0, 30)}…</div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>fee: {fee} ZERC</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>fee: {formatAmountInput(fee)} ZERC</div>
         </div>
       )}
 
@@ -247,14 +247,14 @@ function MergeTab({ addresses, onRefresh }: { addresses: ZercAddress[]; onRefres
           <optgroup label="Transparent">
             {addresses.filter(a => a.type === 'transparent' && a.balance > 0).map(a => (
               <option key={a.address} value={a.address}>
-                [t] {a.address} — {a.balance.toFixed(4)} ZERC
+                [t] {a.address} — {a.balance.toFixed(8)} ZERC
               </option>
             ))}
           </optgroup>
           <optgroup label="Shielded">
             {addresses.filter(a => a.type === 'shielded' && a.balance > 0).map(a => (
               <option key={a.address} value={a.address}>
-                [z] {a.address.slice(0, 40)}… — {a.balance.toFixed(4)} ZERC
+                [z] {a.address.slice(0, 40)}… — {a.balance.toFixed(8)} ZERC
               </option>
             ))}
           </optgroup>
@@ -286,7 +286,7 @@ function MergeTab({ addresses, onRefresh }: { addresses: ZercAddress[]; onRefres
             ↻ Merge all UTXOs → same address
           </div>
           <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-            balance: {selected.balance.toFixed(8)} ZERC · fee: {fee} ZERC · limit: 500 T / 10 Z
+            balance: {selected.balance.toFixed(8)} ZERC · fee: {formatAmountInput(fee)} ZERC · limit: 500 T / 10 Z
           </div>
         </div>
       )}
@@ -392,7 +392,7 @@ function InfoTab() {
         <InfoRow label="Oldest key"           value={info?.keypoololdest
           ? new Date(info.keypoololdest * 1000).toLocaleDateString()
           : '—'} />
-        <InfoRow label="Pay tx fee"           value={`${info?.paytxfee ?? 0} ZERC/kB`} />
+        <InfoRow label="Pay tx fee"           value={`${typeof info?.paytxfee === 'number' ? info.paytxfee.toFixed(8) : '0.00000000'} ZERC/kB`} />
       </InfoSection>
 
       {/* Raw */}
@@ -479,6 +479,11 @@ function ErrorBox({ msg }: { msg: string }) {
       {msg}
     </div>
   )
+}
+
+function formatAmountInput(value: string) {
+  const parsed = parseFloat(value.replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed.toFixed(8) : '0.00000000'
 }
 
 const inputStyle: React.CSSProperties = {

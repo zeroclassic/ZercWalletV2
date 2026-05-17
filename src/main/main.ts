@@ -5,7 +5,7 @@ import path from 'path'
 import { RpcClient } from './rpc'
 import { ConfigManager } from './config'
 import { IPC } from '../shared/types'
-import type { RPCConfig, SendTxParams } from '../shared/types'
+import type { AddressDetails, FeeEstimate, MarketPrice, NodeHealth, RPCConfig, SendTxParams } from '../shared/types'
 
 const isDev = process.env.NODE_ENV === 'development'
   || !require('fs').existsSync(require('path').join(__dirname, '..', 'renderer', 'index.html'))
@@ -14,6 +14,101 @@ let mainWindow: BrowserWindow | null = null
 let rpc: RpcClient
 let hasAddressIndex = false // détecté au démarrage
 const EXPLORER_API_URL = 'https://explorer.zeroclassic.org/api.php'
+const FALLBACK_FEE = 0.0001
+const fs = require('fs')
+const os = require('os')
+const SEND_JOURNAL_FILE = path.join(os.homedir(), '.zerc-wallet', 'send-journal.json')
+
+interface SendJournalEntry {
+  opid: string
+  txid?: string
+  fromAddress: string
+  toAddress: string
+  amount: number
+  memo?: string
+  createdAt: number
+  status: 'submitted' | 'success' | 'failed'
+  error?: string
+}
+
+function loadSendJournal(): SendJournalEntry[] {
+  try {
+    if (!fs.existsSync(SEND_JOURNAL_FILE)) return []
+    return JSON.parse(fs.readFileSync(SEND_JOURNAL_FILE, 'utf-8')) as SendJournalEntry[]
+  } catch {
+    return []
+  }
+}
+
+function saveSendJournal(entries: SendJournalEntry[]) {
+  const dir = path.dirname(SEND_JOURNAL_FILE)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(SEND_JOURNAL_FILE, JSON.stringify(entries.slice(-250), null, 2), 'utf-8')
+}
+
+function upsertSendJournal(entry: SendJournalEntry) {
+  const entries = loadSendJournal()
+  const idx = entries.findIndex(e => e.opid === entry.opid)
+  if (idx >= 0) entries[idx] = { ...entries[idx], ...entry }
+  else entries.push(entry)
+  saveSendJournal(entries)
+}
+
+function updateSendJournal(opid: string, patch: Partial<SendJournalEntry>) {
+  const entries = loadSendJournal()
+  const idx = entries.findIndex(e => e.opid === opid)
+  if (idx === -1) return
+  entries[idx] = { ...entries[idx], ...patch }
+  saveSendJournal(entries)
+}
+
+function applyOperationToJournal(opid: string, result: any) {
+  if (!result) return
+  if (result.status === 'success') {
+    updateSendJournal(opid, { status: 'success', txid: result.result?.txid })
+  }
+  if (result.status === 'failed') {
+    updateSendJournal(opid, { status: 'failed', error: result.error?.message ?? JSON.stringify(result.error) })
+  }
+}
+
+async function syncSendJournal() {
+  const submitted = loadSendJournal().filter(entry => entry.status === 'submitted')
+  for (const entry of submitted) {
+    try {
+      const status = await rpc.call('z_getoperationstatus', [[entry.opid]]).catch(() => [])
+      if (status?.length > 0) {
+        applyOperationToJournal(entry.opid, status[0])
+        continue
+      }
+
+      const results = await rpc.call('z_getoperationresult', [[entry.opid]]).catch(() => [])
+      if (results?.length > 0) applyOperationToJournal(entry.opid, results[0])
+    } catch {
+      // Keep the submitted state when the node cannot answer.
+    }
+  }
+}
+
+function journalToTransactions(): any[] {
+  return loadSendJournal().map(entry => ({
+    txid: entry.txid ?? entry.opid,
+    amount: -Math.abs(entry.amount),
+    fee: undefined,
+    confirmations: entry.status === 'success' && entry.txid ? 1 : 0,
+    blocktime: Math.floor(entry.createdAt / 1000),
+    address: entry.fromAddress,
+    fromAddress: entry.fromAddress,
+    toAddress: entry.toAddress,
+    memo: entry.memo,
+    error: entry.error,
+    type: 'send',
+    category: entry.status === 'failed' ? 'failed' : 'send',
+    isShielded: entry.fromAddress.startsWith('z') || entry.toAddress.startsWith('z'),
+    sourceRank: 0,
+    localJournal: true,
+  }))
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -167,6 +262,80 @@ ipcMain.handle(IPC.GET_NODE_INFO, async () => {
 })
 
 // ─── Balance ──────────────────────────────────────────────────────────────────
+ipcMain.handle(IPC.GET_NODE_HEALTH, async (): Promise<NodeHealth> => {
+  const config = ConfigManager.load().rpc
+  const processStatus = {
+    available: nodeManager.isAvailable(),
+    running: nodeManager.isRunning(),
+    startedByUs: nodeManager.wasStartedByUs(),
+    path: nodeManager.getPath(),
+    platform: process.platform,
+  }
+
+  const [localResult, explorerResult] = await Promise.allSettled([
+    Promise.all([
+      rpc.call('getinfo'),
+      rpc.call('getblockchaininfo').catch(() => null),
+    ]),
+    axios.get(EXPLORER_API_URL, {
+      params: { action: 'height' },
+      timeout: 8_000,
+    }),
+  ])
+
+  const health: NodeHealth = {
+    checkedAt: new Date().toISOString(),
+    rpc: {
+      ok: localResult.status === 'fulfilled',
+      host: config.host,
+      port: config.port,
+      error: localResult.status === 'rejected' ? String(localResult.reason?.message ?? localResult.reason) : undefined,
+    },
+    process: processStatus,
+    local: {},
+    explorer: { ok: false },
+    addressIndex: hasAddressIndex,
+  }
+
+  if (localResult.status === 'fulfilled') {
+    const [info, blockchainInfo] = localResult.value
+    health.local = {
+      version: info.build ?? `v${Math.floor(info.version / 1000000)}.${Math.floor((info.version % 1000000) / 10000)}.${Math.floor((info.version % 10000) / 100)}`,
+      protocolversion: info.protocolversion,
+      blocks: info.blocks,
+      headers: blockchainInfo?.headers,
+      connections: info.connections,
+      difficulty: info.difficulty,
+      syncing: blockchainInfo ? (blockchainInfo.headers - blockchainInfo.blocks) > 10 : false,
+      syncProgress: blockchainInfo?.verificationprogress,
+    }
+  }
+
+  if (explorerResult.status === 'fulfilled' && explorerResult.value.data?.ok) {
+    const data = explorerResult.value.data.data ?? {}
+    const height = Number(data.height)
+    health.explorer = {
+      ok: true,
+      height: Number.isFinite(height) ? height : undefined,
+      hash: data.hash ?? data.best_block_hash,
+      time: data.time,
+    }
+  } else {
+    health.explorer = {
+      ok: false,
+      error: explorerResult.status === 'rejected'
+        ? String(explorerResult.reason?.message ?? explorerResult.reason)
+        : String(explorerResult.value?.data?.error ?? 'Explorer returned an invalid response'),
+    }
+  }
+
+  if (typeof health.local.blocks === 'number' && typeof health.explorer.height === 'number') {
+    health.lagBlocks = Math.max(0, health.explorer.height - health.local.blocks)
+  }
+
+  return health
+})
+
 ipcMain.handle(IPC.GET_BALANCE, async () => {
   const transparent = await rpc.call<number>('getbalance')
   const zTotal = await rpc.call<{ transparent: string; private: string; total: string }>('z_gettotalbalance').catch(() => null)
@@ -222,6 +391,14 @@ async function resolveFromAddress(txid: string, vout: number): Promise<string | 
   } catch { return null }
 }
 
+async function getWalletTransactionMeta(txid: string): Promise<any | null> {
+  try {
+    return await rpc.call('gettransaction', [txid])
+  } catch {
+    return null
+  }
+}
+
 function explorerTimeToBlocktime(value: unknown): number | undefined {
   if (typeof value !== 'string' || value.length === 0) return undefined
   const normalized = value.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')
@@ -239,8 +416,15 @@ async function getExplorerAddressTransactions(addresses: string[], currentHeight
       })
       if (!response.data?.ok) return []
 
-      const events = response.data.data?.events ?? []
+      const events = [
+        ...(response.data.data?.events ?? []),
+        ...(response.data.data?.out_events ?? []),
+      ]
+      const seenEvents = new Set<string>()
       return events.map((event: any) => {
+        const key = `${event.txid}:${event.kind}:${event.value}:${event.height}`
+        if (seenEvents.has(key)) return null
+        seenEvents.add(key)
         const height = typeof event.height === 'number' ? event.height : Number(event.height)
         const blocktime = explorerTimeToBlocktime(event.time)
         const isSend = event.kind === 'out'
@@ -260,7 +444,7 @@ async function getExplorerAddressTransactions(addresses: string[], currentHeight
           height,
           sourceRank: 0,
         }
-      })
+      }).filter(Boolean)
     } catch (err: any) {
       console.warn(`[TX] explorer address lookup failed for ${address}:`, err.message)
       return []
@@ -269,8 +453,58 @@ async function getExplorerAddressTransactions(addresses: string[], currentHeight
   return results.flat()
 }
 
+ipcMain.handle(IPC.GET_ADDRESS_DETAILS, async (_, address: string): Promise<AddressDetails> => {
+  if (!address || address.startsWith('z')) {
+    const balance = address
+      ? await rpc.call<number>('z_getbalance', [address]).catch(() => 0)
+      : 0
+    return { address, source: 'local', balance, events: [] }
+  }
+
+  try {
+    const response = await axios.get(EXPLORER_API_URL, {
+      params: { action: 'address', addr: address, limit: 80, offset: 0 },
+      timeout: 10_000,
+    })
+    if (!response.data?.ok) throw new Error(response.data?.error ?? 'Explorer returned an error')
+
+    const data = response.data.data ?? {}
+    const stats = data.address ?? {}
+    const events = (data.events ?? []).map((event: any) => ({
+      txid: String(event.txid ?? ''),
+      kind: event.kind === 'out' ? 'out' as const : 'in' as const,
+      value: Number(event.value) || 0,
+      height: event.height === null || event.height === undefined ? undefined : Number(event.height),
+      time: event.time,
+    }))
+
+    return {
+      address,
+      source: 'explorer',
+      balance: Number(stats.real_balance ?? stats.balance) || 0,
+      receivedTotal: stats.received_total === undefined ? undefined : Number(stats.received_total),
+      sentTotal: stats.sent_total === undefined ? undefined : Number(stats.sent_total),
+      txCount: stats.tx_count === undefined ? undefined : Number(stats.tx_count),
+      firstSeenTime: stats.first_seen_time,
+      lastSeenTime: stats.last_seen_time,
+      lastSeenHeight: stats.last_seen_height === undefined ? undefined : Number(stats.last_seen_height),
+      events,
+    }
+  } catch (err: any) {
+    return {
+      address,
+      source: 'local',
+      balance: 0,
+      events: [],
+      error: err.message ?? 'Explorer lookup failed',
+    }
+  }
+})
+
 ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
   const allTxs: any[] = []
+  await syncSendJournal()
+  allTxs.push(...journalToTransactions())
   const walletAddrs = await getWalletAddresses()
   const tWalletAddrs = Array.from(walletAddrs).filter(a => !a.startsWith('z'))
   const currentInfo = await rpc.call('getinfo').catch(() => ({ blocks: 0 }))
@@ -371,11 +605,15 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
         for (const r of (zReceived ?? []).slice(-20)) {
           // Evite les doublons avec listtransactions
           if (allTxs.some(t => t.txid === r.txid && t.address === zaddr)) continue
+          const txMeta = await getWalletTransactionMeta(r.txid)
           allTxs.push({
             txid: r.txid, amount: r.amount, fee: undefined,
-            confirmations: 1, blocktime: undefined,
+            confirmations: txMeta?.confirmations ?? r.confirmations ?? 0,
+            blocktime: txMeta?.blocktime ?? txMeta?.time,
             address: zaddr, fromAddress: null, toAddress: null,
             memo: r.memo, type: 'receive', category: 'receive', isShielded: true,
+            height: txMeta?.blockindex,
+            sourceRank: 2,
           })
         }
       } catch { /* ignore */ }
@@ -403,8 +641,8 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
   // Résout from/to
   for (const tx of deduped) {
     if (tx.isShielded) {
-      tx.fromAddress = tx.type === 'receive' ? 'Shielded address' : tx.address
-      tx.toAddress   = tx.type === 'receive' ? tx.address : 'Shielded address'
+      tx.fromAddress = tx.fromAddress ?? (tx.type === 'receive' ? 'Shielded address' : tx.address)
+      tx.toAddress   = tx.toAddress ?? (tx.type === 'receive' ? tx.address : 'Shielded address')
       continue
     }
     if (tx.category === 'generate') {
@@ -414,6 +652,12 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
     }
     try {
       const raw = await rpc.call('getrawtransaction', [tx.txid, 1]).catch(() => null)
+      if (raw?.vin?.some((vin: any) => vin.coinbase)) {
+        tx.fromAddress = 'Coinbase (mining reward)'
+        tx.toAddress = tx.address
+        tx.category = 'generate'
+        continue
+      }
       if (!raw) { tx.fromAddress = '—'; tx.toAddress = tx.address; continue }
       if (tx.type === 'receive') {
         const vin = raw.vin?.[0]
@@ -434,9 +678,51 @@ ipcMain.handle(IPC.GET_TRANSACTIONS, async () => {
 })
 
 // ─── New address ──────────────────────────────────────────────────────────────
+ipcMain.handle(IPC.GET_MARKET_PRICE, async (): Promise<MarketPrice> => {
+  try {
+    const response = await axios.get('https://explorer.zeroclassic.org/api.php', {
+      params: { action: 'price' },
+      timeout: 10_000,
+    })
+    const data = response.data?.data ?? response.data
+    const rawPrice = data?.last_price ?? data?.price ?? data?.usd
+    const price = Number(rawPrice)
+    return {
+      symbol: 'ZERC',
+      currency: 'USD',
+      price: Number.isFinite(price) ? price : null,
+      source: 'explorer',
+      updatedAt: new Date().toISOString(),
+      error: Number.isFinite(price) ? undefined : 'Explorer price unavailable',
+    }
+  } catch (err: any) {
+    return {
+      symbol: 'ZERC',
+      currency: 'USD',
+      price: null,
+      source: 'explorer',
+      updatedAt: new Date().toISOString(),
+      error: err?.message ?? 'Explorer price unavailable',
+    }
+  }
+})
+
 ipcMain.handle(IPC.NEW_ADDRESS, async (_, type: 'transparent' | 'shielded') => {
   if (type === 'shielded') return rpc.call('z_getnewaddress')
   return rpc.call('getnewaddress')
+})
+
+ipcMain.handle(IPC.ESTIMATE_FEE, async (_, blocks = 6): Promise<FeeEstimate> => {
+  const targetBlocks = Number.isFinite(Number(blocks)) && Number(blocks) > 0 ? Number(blocks) : 6
+  try {
+    const fee = await rpc.call<number>('estimatefee', [targetBlocks])
+    if (Number.isFinite(fee) && fee > 0) {
+      return { fee, source: 'estimatefee', blocks: targetBlocks }
+    }
+    return { fee: FALLBACK_FEE, source: 'fallback', blocks: targetBlocks, error: `estimatefee returned ${fee}` }
+  } catch (err: any) {
+    return { fee: FALLBACK_FEE, source: 'fallback', blocks: targetBlocks, error: err?.message ?? 'estimatefee unavailable' }
+  }
 })
 
 // ─── Send transaction ─────────────────────────────────────────────────────────
@@ -446,11 +732,25 @@ ipcMain.handle(IPC.SEND_TX, async (_, params: SendTxParams) => {
     ? parseFloat((params.amount as string).replace(',', '.'))
     : params.amount
   if (isNaN(amount) || amount <= 0) throw new Error('Invalid amount')
+  const fee = typeof params.fee === 'string'
+    ? parseFloat((params.fee as string).replace(',', '.'))
+    : params.fee
+  const normalizedFee = Number.isFinite(fee) && fee && fee > 0 ? fee : undefined
   const isShielded = fromAddress.startsWith('z') || toAddress.startsWith('z')
   try {
     const recipients: any[] = [{ address: toAddress, amount }]
     if (memo) recipients[0].memo = memo
-    const opid = await rpc.call('z_sendmany', [fromAddress, recipients, 1])
+    const args = normalizedFee ? [fromAddress, recipients, 1, normalizedFee] : [fromAddress, recipients, 1]
+    const opid = await rpc.call('z_sendmany', args)
+    upsertSendJournal({
+      opid,
+      fromAddress,
+      toAddress,
+      amount,
+      memo,
+      createdAt: Date.now(),
+      status: 'submitted',
+    })
     return { opid, type: isShielded ? 'shielded' : 'transparent' }
   } catch (err: any) {
     const msg = err?.message ?? 'Transaction failed'
@@ -462,9 +762,17 @@ ipcMain.handle(IPC.SEND_TX, async (_, params: SendTxParams) => {
 // ─── Operation status ─────────────────────────────────────────────────────────
 ipcMain.handle('wallet:getOperationStatus', async (_, opid: string) => {
   const results = await rpc.call('z_getoperationresult', [[opid]]).catch(() => [])
-  if (results?.length > 0) return results[0]
+  if (results?.length > 0) {
+    const result = results[0]
+    applyOperationToJournal(opid, result)
+    return result
+  }
   const status = await rpc.call('z_getoperationstatus', [[opid]]).catch(() => [])
-  if (status?.length > 0) return status[0]
+  if (status?.length > 0) {
+    const result = status[0]
+    applyOperationToJournal(opid, result)
+    return result
+  }
   return null
 })
 

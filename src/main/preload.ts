@@ -2,10 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const IPC = {
   GET_NODE_INFO:          'wallet:getNodeInfo',
+  GET_NODE_HEALTH:        'node:getHealth',
   GET_BALANCE:            'wallet:getBalance',
   GET_ADDRESSES:          'wallet:getAddresses',
+  GET_ADDRESS_DETAILS:    'wallet:getAddressDetails',
   GET_TRANSACTIONS:       'wallet:getTransactions',
+  GET_MARKET_PRICE:       'wallet:getMarketPrice',
   NEW_ADDRESS:            'wallet:newAddress',
+  ESTIMATE_FEE:           'wallet:estimateFee',
   SEND_TX:                'wallet:sendTransaction',
   DUMP_PRIVKEY:           'keys:dumpPrivkey',
   Z_EXPORT_KEY:           'keys:zExportKey',
@@ -22,11 +26,15 @@ const IPC = {
 contextBridge.exposeInMainWorld('zerc', {
   // Node
   getNodeInfo:        () => ipcRenderer.invoke(IPC.GET_NODE_INFO),
+  getNodeHealth:      () => ipcRenderer.invoke(IPC.GET_NODE_HEALTH),
   // Wallet
   getBalance:         () => ipcRenderer.invoke(IPC.GET_BALANCE),
   getAddresses:       () => ipcRenderer.invoke(IPC.GET_ADDRESSES),
+  getAddressDetails:  (address: string) => ipcRenderer.invoke(IPC.GET_ADDRESS_DETAILS, address),
   getTransactions:    () => ipcRenderer.invoke(IPC.GET_TRANSACTIONS),
+  getMarketPrice:     () => ipcRenderer.invoke(IPC.GET_MARKET_PRICE),
   newAddress:         (type: 'transparent' | 'shielded') => ipcRenderer.invoke(IPC.NEW_ADDRESS, type),
+  estimateFee:        (blocks?: number) => ipcRenderer.invoke(IPC.ESTIMATE_FEE, blocks),
   sendTransaction:    (params: unknown) => ipcRenderer.invoke(IPC.SEND_TX, params),
   // Keys & Backup
   dumpPrivkey:        (address: string) => ipcRenderer.invoke(IPC.DUMP_PRIVKEY, address),
