@@ -9,7 +9,7 @@ export interface RPCConfig {
 
 export const DEFAULT_RPC_CONFIG: RPCConfig = {
   host: '127.0.0.1',
-  port: 8545,
+  port: 10004,
   username: 'zerc',
   password: '',
 }

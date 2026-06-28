@@ -1,6 +1,6 @@
 # ZercWallet v2.0
 
-Desktop wallet for **ZeroClassic (ZERC)** — compatible with node Phoenix 5.0.0-beta2.
+Desktop wallet for **ZeroClassic (ZERC)** — compatible with node ZercNOVA 5.1.4.
 Built with Electron 28 + React 18 + TypeScript. Runs on **Windows**, **Linux** and **macOS**.
 
 ---
@@ -27,7 +27,7 @@ Built with Electron 28 + React 18 + TypeScript. Runs on **Windows**, **Linux** a
 |------|---------|
 | Node.js | ≥ 18.x |
 | npm | ≥ 9.x |
-| zerod | Phoenix 5.0.0-beta2 |
+| zerod | ZercNOVA 5.1.4 |
 
 > **Windows**: Download Node.js from https://nodejs.org (LTS version).
 > Verify installation: `node -v` and `npm -v` in PowerShell.
@@ -60,6 +60,12 @@ timestampindex=1
 ```
 
 > ZercWallet **auto-detects** this file on first launch and pre-fills the Settings.
+
+ZercNOVA 5.1.4 applies a protocol burn fee of 1% of the sent amount. ZercWallet includes this burn in the send review and blocks transactions unless the source address can cover:
+
+```text
+amount + network fee + burn fee
+```
 
 ---
 
@@ -123,7 +129,7 @@ To update the version, edit **only** `package.json`:
 {
   "version": "2.1.0",
   "zerc": {
-    "targetNode": "Phoenix 5.0.0"
+    "targetNode": "ZercNOVA - 5.1.4"
   }
 }
 ```

@@ -4,7 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.IPC = exports.DEFAULT_RPC_CONFIG = void 0;
 exports.DEFAULT_RPC_CONFIG = {
     host: '127.0.0.1',
-    port: 8545,
+    port: 10004,
     username: 'zerc',
     password: '',
 };

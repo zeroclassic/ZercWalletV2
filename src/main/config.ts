@@ -10,6 +10,19 @@ interface AppConfig {
 
 const CONFIG_DIR = path.join(os.homedir(), '.zerc-wallet')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
+const LEGACY_DEFAULT_RPC_PORT = 8545
+
+function normalizeRpcConfig(rpc: RPCConfig): RPCConfig {
+  if (
+    rpc.host === DEFAULT_RPC_CONFIG.host &&
+    rpc.port === LEGACY_DEFAULT_RPC_PORT &&
+    rpc.username === DEFAULT_RPC_CONFIG.username &&
+    !rpc.password
+  ) {
+    return { ...rpc, port: DEFAULT_RPC_CONFIG.port }
+  }
+  return rpc
+}
 
 export class ConfigManager {
   static load(): AppConfig {
@@ -20,7 +33,7 @@ export class ConfigManager {
       const raw = fs.readFileSync(CONFIG_FILE, 'utf-8')
       const parsed = JSON.parse(raw) as Partial<AppConfig>
       return {
-        rpc: { ...DEFAULT_RPC_CONFIG, ...parsed.rpc },
+        rpc: normalizeRpcConfig({ ...DEFAULT_RPC_CONFIG, ...parsed.rpc }),
       }
     } catch {
       return ConfigManager.defaults()

@@ -15,6 +15,8 @@ let rpc: RpcClient
 let hasAddressIndex = false // détecté au démarrage
 const EXPLORER_API_URL = 'https://explorer.zeroclassic.org/api.php'
 const FALLBACK_FEE = 0.0001
+const ZATOSHIS = 100_000_000
+const BURN_RATE = 0.01
 const fs = require('fs')
 const os = require('os')
 const SEND_JOURNAL_FILE = path.join(os.homedir(), '.zerc-wallet', 'send-journal.json')
@@ -60,6 +62,31 @@ function updateSendJournal(opid: string, patch: Partial<SendJournalEntry>) {
   if (idx === -1) return
   entries[idx] = { ...entries[idx], ...patch }
   saveSendJournal(entries)
+}
+
+function toUnits(value: number) {
+  return Math.round(value * ZATOSHIS)
+}
+
+function fromUnits(value: number) {
+  return value / ZATOSHIS
+}
+
+function calculateBurnUnits(amountUnits: number) {
+  return Math.ceil(amountUnits * BURN_RATE)
+}
+
+function formatZerc(value: number) {
+  return fromUnits(toUnits(value)).toFixed(8)
+}
+
+async function getSpendableBalance(address: string): Promise<number> {
+  if (address.startsWith('z')) {
+    return await rpc.call<number>('z_getbalance', [address]).catch(() => 0)
+  }
+
+  const utxos = await rpc.call<any[]>('listunspent', [1, 9999999, [address]]).catch(() => [])
+  return utxos.reduce((sum, utxo) => sum + (Number(utxo.amount) || 0), 0)
 }
 
 function applyOperationToJournal(opid: string, result: any) {
@@ -736,8 +763,23 @@ ipcMain.handle(IPC.SEND_TX, async (_, params: SendTxParams) => {
     ? parseFloat((params.fee as string).replace(',', '.'))
     : params.fee
   const normalizedFee = Number.isFinite(fee) && fee && fee > 0 ? fee : undefined
+  const networkFee = normalizedFee ?? FALLBACK_FEE
+  const amountUnits = toUnits(amount)
+  const networkFeeUnits = toUnits(networkFee)
+  const burnUnits = calculateBurnUnits(amountUnits)
+  const totalRequiredUnits = amountUnits + networkFeeUnits + burnUnits
   const isShielded = fromAddress.startsWith('z') || toAddress.startsWith('z')
   try {
+    const spendableBalance = await getSpendableBalance(fromAddress)
+    const spendableUnits = toUnits(spendableBalance)
+    if (spendableUnits < totalRequiredUnits) {
+      throw new Error(
+        `Insufficient balance. Required ${formatZerc(fromUnits(totalRequiredUnits))} ZERC ` +
+        `(amount ${formatZerc(amount)} + network fee ${formatZerc(networkFee)} + burn fee ${formatZerc(fromUnits(burnUnits))}), ` +
+        `available ${formatZerc(spendableBalance)} ZERC.`
+      )
+    }
+
     const recipients: any[] = [{ address: toAddress, amount }]
     if (memo) recipients[0].memo = memo
     const args = normalizedFee ? [fromAddress, recipients, 1, normalizedFee] : [fromAddress, recipients, 1]

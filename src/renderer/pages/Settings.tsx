@@ -1,13 +1,6 @@
 import React, { useState, useEffect } from 'react'
 
-import type { RPCConfig } from '@shared/types'
-
-const DEFAULT_RPC_CONFIG: RPCConfig = {
-  host: '127.0.0.1',
-  port: 8545,
-  username: 'zerc',
-  password: '',
-}
+import { DEFAULT_RPC_CONFIG, type RPCConfig } from '@shared/types.ts'
 
 interface Props {
   onRefresh: () => Promise<void>
@@ -84,8 +77,8 @@ export function Settings({ onRefresh }: Props) {
             <input
               type="number"
               value={config.port}
-              onChange={e => setConfig(c => ({ ...c, port: parseInt(e.target.value) || 8545 }))}
-              placeholder="8545"
+              onChange={e => setConfig(c => ({ ...c, port: parseInt(e.target.value) || DEFAULT_RPC_CONFIG.port }))}
+              placeholder={String(DEFAULT_RPC_CONFIG.port)}
               style={inputStyle}
               className="selectable"
             />

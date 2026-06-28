@@ -12,6 +12,7 @@ type SendStatus = 'idle' | 'confirming' | 'sending' | 'waiting' | 'success' | 'e
 
 const FALLBACK_FEE = 0.0001
 const ZATOSHIS = 100_000_000
+const BURN_RATE = 0.01
 
 export function Send({ addresses, onRefresh }: Props) {
   const [fromAddress, setFromAddress] = useState('')
@@ -36,10 +37,11 @@ export function Send({ addresses, onRefresh }: Props) {
   const isShielded = fromAddress.startsWith('z') || toAddress.startsWith('z')
   const feeUnits = toUnits(estimatedFee)
   const amountUnits = toUnits(parsedAmount)
+  const burnUnits = calculateBurnUnits(amountUnits)
   const balanceUnits = selected ? toUnits(selected.balance) : 0
-  const totalUnits = amountUnits + feeUnits
+  const totalUnits = amountUnits + feeUnits + burnUnits
   const remainingUnits = selected ? balanceUnits - totalUnits : 0
-  const maxSpendable = selected ? fromUnits(Math.max(0, balanceUnits - feeUnits)) : 0
+  const maxSpendable = selected ? calculateMaxSpendable(balanceUnits, feeUnits) : 0
   const trimmedRecipient = toAddress.trim()
   const knownRecipient = contacts.find(c => c.address === trimmedRecipient)
   const canSaveRecipient = isLikelyAddress(toAddress) && !knownRecipient
@@ -231,6 +233,7 @@ export function Send({ addresses, onRefresh }: Props) {
             {knownRecipient && <ConfirmRow label="Contact" value={knownRecipient.name} />}
             <ConfirmRow label="Amount" value={`${fmtZerc(parsedAmount)} ZERC`} accent="var(--accent-light)" />
             <ConfirmRow label="Network fee" value={`${fmtZerc(estimatedFee)} ZERC (${feeSource})`} />
+            <ConfirmRow label="Burn fee" value={`${fmtZerc(fromUnits(burnUnits))} ZERC (1%)`} />
             <ConfirmRow label="Total required" value={`${fmtZerc(fromUnits(totalUnits))} ZERC`} accent="var(--gold)" />
             <ConfirmRow label="Remaining" value={`${fmtZerc(fromUnits(Math.max(0, remainingUnits)))} ZERC`} />
             {memo && <ConfirmRow label="Memo" value={memo} />}
@@ -261,11 +264,12 @@ export function Send({ addresses, onRefresh }: Props) {
               </option>
             ))}
           </select>
-          {selected && <Hint>Available: <Mono>{fmtZerc(selected.balance)} ZERC</Mono> - max after fee: <Mono>{fmtZerc(maxSpendable)} ZERC</Mono></Hint>}
+          {selected && <Hint>Available: <Mono>{fmtZerc(selected.balance)} ZERC</Mono> - max after fees: <Mono>{fmtZerc(maxSpendable)} ZERC</Mono></Hint>}
           {selected && (
             <Hint>
-              Fee: <Mono>{feeLoading ? 'estimating...' : `${fmtZerc(estimatedFee)} ZERC`}</Mono>
+              Network fee: <Mono>{feeLoading ? 'estimating...' : `${fmtZerc(estimatedFee)} ZERC`}</Mono>
               {' '}({feeSource}{feeError ? `: ${feeError}` : ''})
+              {amount && <> - Burn: <Mono>{fmtZerc(fromUnits(burnUnits))} ZERC</Mono> (1%)</>}
             </Hint>
           )}
         </Field>
@@ -320,7 +324,7 @@ export function Send({ addresses, onRefresh }: Props) {
             )}
           </div>
           {selected && amount && (
-            <Hint>After network fee: <Mono>{fmtZerc(fromUnits(Math.max(0, remainingUnits)))} ZERC remaining</Mono></Hint>
+            <Hint>After network and burn fees: <Mono>{fmtZerc(fromUnits(Math.max(0, remainingUnits)))} ZERC remaining</Mono></Hint>
           )}
         </Field>
 
@@ -362,6 +366,16 @@ function fromUnits(value: number) {
   return value / ZATOSHIS
 }
 
+function calculateBurnUnits(amountUnits: number) {
+  return Math.ceil(amountUnits * BURN_RATE)
+}
+
+function calculateMaxSpendable(balanceUnits: number, feeUnits: number) {
+  const availableUnits = balanceUnits - feeUnits
+  if (availableUnits <= 0) return 0
+  return fromUnits(Math.floor(availableUnits / (1 + BURN_RATE)))
+}
+
 function fmtZerc(value: number) {
   return fromUnits(toUnits(value)).toFixed(8)
 }
@@ -373,12 +387,15 @@ function isLikelyAddress(value: string) {
 
 function validateSend(selected: ZercAddress | undefined, toAddress: string, amount: number, fee: number) {
   const errors: string[] = []
+  const amountUnits = toUnits(amount)
+  const feeUnits = toUnits(fee)
+  const burnUnits = calculateBurnUnits(amountUnits)
   if (!selected) errors.push('Select a source address.')
   if (!toAddress.trim()) errors.push('Enter a recipient address.')
   else if (!isLikelyAddress(toAddress)) errors.push('Recipient address format looks invalid.')
   if (!amount || amount <= 0) errors.push('Enter an amount greater than zero.')
-  if (selected && toUnits(amount) + toUnits(fee) > toUnits(selected.balance)) {
-    errors.push(`Insufficient balance for amount plus ${fmtZerc(fee)} ZERC network fee.`)
+  if (selected && amountUnits + feeUnits + burnUnits > toUnits(selected.balance)) {
+    errors.push(`Insufficient balance for amount plus ${fmtZerc(fee)} ZERC network fee and ${fmtZerc(fromUnits(burnUnits))} ZERC burn fee.`)
   }
   return errors
 }
